@@ -6,17 +6,26 @@
 # Auther:Maple 二次修改使用请不要删除此段注释
 
 # 版本信息
-CURRENT_VERSION="3.0.0"
+CURRENT_VERSION="3.3.1"
 VERSION_FILE_URL="https://raw.githubusercontent.com/Mapleawaa/PVE-Tools-9/main/VERSION"
 
-# 颜色定义
+# 颜色定义 - 保持一致性
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 MAGENTA='\033[0;35m'
+WHITE='\033[1;37m'
+ORANGE='\033[0;33m'  # Alternative to YELLOW for warnings
 NC='\033[0m' # No Color
+
+# UI 界面一致性常量
+UI_BORDER="${CYAN}┌────────────────────────────────────────────────┐${NC}"
+UI_DIVIDER="${CYAN}├────────────────────────────────────────────────┤${NC}"
+UI_FOOTER="${CYAN}└────────────────────────────────────────────────┘${NC}"
+UI_HEADER="${CYAN}------------------------------------------------${NC}"
+UI_FOOTER_SHORT="${CYAN}------------------------------------------------${NC}"
 
 # 镜像源配置
 MIRROR_USTC="https://mirrors.ustc.edu.cn/proxmox/debian/pve"
@@ -26,45 +35,144 @@ SELECTED_MIRROR=""
 
 # 日志函数
 log_info() {
-    echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')] [INFO]${NC} $1" | tee -a /var/log/pve-tools.log
+    echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')]${NC} ${CYAN}[INFO]${NC} $1" | tee -a /var/log/pve-tools.log
 }
 
 log_warn() {
-    echo -e "${YELLOW}[$(date +'%Y-%m-%d %H:%M:%S')] [WARN]${NC} $1" | tee -a /var/log/pve-tools.log
+    echo -e "${YELLOW}[$(date +'%Y-%m-%d %H:%M:%S')]${NC} ${ORANGE}[WARN]${NC} $1" | tee -a /var/log/pve-tools.log
 }
 
 log_error() {
-    echo -e "${RED}[$(date +'%Y-%m-%d %H:%M:%S')] [ERROR]${NC} $1" | tee -a /var/log/pve-tools.log >&2
+    echo -e "${RED}[$(date +'%Y-%m-%d %H:%M:%S')]${NC} ${RED}[ERROR]${NC} $1" | tee -a /var/log/pve-tools.log >&2
 }
 
 log_step() {
-    echo -e "${CYAN}[$(date +'%Y-%m-%d %H:%M:%S')] [STEP]${NC} $1" | tee -a /var/log/pve-tools.log
+    echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')]${NC} ${MAGENTA}[STEP]${NC} $1" | tee -a /var/log/pve-tools.log
 }
 
 log_success() {
-    echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')] [SUCCESS]${NC} $1" | tee -a /var/log/pve-tools.log
+    echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')]${NC} ${GREEN}[SUCCESS]${NC} $1" | tee -a /var/log/pve-tools.log
 }
 
 log_tips(){
-    echo -e "${MAGENTA}[$(date +'%Y-%m-%d %H:%M:%S')] [TIPS]${NC} $1" | tee -a /var/log/pve-tools.log
+    echo -e "${CYAN}[$(date +'%Y-%m-%d %H:%M:%S')]${NC} ${MAGENTA}[TIPS]${NC} $1" | tee -a /var/log/pve-tools.log
+}
+
+# Enhanced error handling function with consistent messaging
+display_error() {
+    local error_msg="$1"
+    local suggestion="${2:-请检查输入或联系作者寻求帮助。}"
+    
+    log_error "$error_msg"
+    echo -e "${YELLOW}提示: $suggestion${NC}"
+    pause_function
+}
+
+# Enhanced success feedback
+display_success() {
+    local success_msg="$1"
+    local next_step="${2:-}"
+    
+    log_success "$success_msg"
+    if [[ -n "$next_step" ]]; then
+        echo -e "${GREEN}下一步: $next_step${NC}"
+    fi
+}
+
+# Confirmation prompt with consistent UI
+confirm_action() {
+    local action_desc="$1"
+    local default_choice="${2:-N}"
+    
+    echo -e "${YELLOW}确认操作: $action_desc${NC}"
+    read -p "请输入 'yes' 确认继续，其他任意键取消 [$default_choice]: " -r confirm
+    if [[ "$confirm" == "yes" || "$confirm" == "YES" ]]; then
+        return 0
+    else
+        log_info "操作已取消"
+        return 1
+    fi
 }
 
 # 进度指示函数
 show_progress() {
     local message="$1"
-    echo -ne "${CYAN}[....]${NC} $message\033[0K\r"
+    local spinner="|/-\\"
+    local i=0
+    # Print initial message
+    echo -ne "${CYAN}[    ]${NC} $message\033[0K\r"
+    
+    # Update the spinner position in the box
+    while true; do
+        i=$(( (i + 1) % 4 ))
+        echo -ne "\b\b\b\b\b${CYAN}[${spinner:$i:1}]${NC}\033[0K\r"
+        sleep 0.1
+    done &
+    # Store the background job ID to be killed later
+    SPINNER_PID=$!
 }
 
 update_progress() {
     local message="$1"
+    # Kill the spinner if running
+    if [[ -n "$SPINNER_PID" ]]; then
+        kill $SPINNER_PID 2>/dev/null
+    fi
     echo -ne "${GREEN}[ OK ]${NC} $message\033[0K\r"
     echo
+}
+
+# Enhanced visual feedback function
+show_status() {
+    local status="$1"
+    local message="$2"
+    local color="$3"
+    
+    case $status in
+        "info")
+            echo -e "${CYAN}[INFO]${NC} $message"
+            ;;
+        "success")
+            echo -e "${GREEN}[ OK ]${NC} $message"
+            ;;
+        "warning")
+            echo -e "${YELLOW}[WARN]${NC} $message"
+            ;;
+        "error")
+            echo -e "${RED}[FAIL]${NC} $message"
+            ;;
+        "step")
+            echo -e "${MAGENTA}[STEP]${NC} $message"
+            ;;
+        *)
+            echo -e "${WHITE}[$status]${NC} $message"
+            ;;
+    esac
+}
+
+# Progress bar function
+show_progress_bar() {
+    local current="$1"
+    local total="$2"
+    local message="$3"
+    local width=40
+    local percentage=$(( current * 100 / total ))
+    local filled=$(( width * current / total ))
+    
+    printf "${CYAN}[${NC}"
+    for ((i=0; i<filled; i++)); do
+        printf "█"
+    done
+    for ((i=filled; i<width; i++)); do
+        printf " "
+    done
+    printf "${CYAN}]${NC} ${percentage}%% $message\r"
 }
 
 # 显示横幅
 show_banner() {
     clear
-    echo -e "${BLUE}"
+    echo -e "${CYAN}"
     cat << 'EOF'
 ██████╗ ██╗   ██╗███████╗    ████████╗ ██████╗  ██████╗ ██╗     ███████╗     █████╗ 
 ██╔══██╗██║   ██║██╔════╝    ╚══██╔══╝██╔═══██╗██╔═══██╗██║     ██╔════╝    ██╔══██╗
@@ -74,11 +182,13 @@ show_banner() {
 ╚═╝       ╚═══╝  ╚══════╝       ╚═╝    ╚═════╝  ╚═════╝ ╚══════╝╚══════╝     ╚════╝ 
 EOF
     echo -e "${NC}"
-    echo -e "${YELLOW}                    PVE 9.0 一键配置神器${NC}"
-    echo -e "${GREEN}                     让 PVE 配置变得简单快乐${NC}"
-    echo -e "${CYAN}                      作者: Maple & Claude 4${NC}"
-    echo -e "                        当前版本: ${YELLOW}$CURRENT_VERSION${NC}"
-    echo -e "                        最新版本: ${GREEN}$remote_version${NC}"
+    echo -e "${YELLOW}                    ═══════════════════════════════════════${NC}"
+    echo -e "${YELLOW}                           PVE 9.0 一键配置神器${NC}"
+    echo -e "${GREEN}                            让 PVE 配置变得简单快乐${NC}"
+    echo -e "${CYAN}                             作者: Maple & Claude 4${NC}"
+    echo -e "${NC}                             当前版本: ${YELLOW}$CURRENT_VERSION${NC}"
+    echo -e "${NC}                             最新版本: ${GREEN}$remote_version${NC}"
+    echo -e "${YELLOW}                    ═══════════════════════════════════════${NC}"
     echo
 }
 
@@ -404,17 +514,20 @@ remove_old_kernels() {
 # 内核管理主菜单
 kernel_management_menu() {
     while true; do
-        echo -e "\n${CYAN}--------------- 内核管理菜单 ---------------${NC}"
-        echo -e "  ${GREEN}1${NC}. 显示当前内核信息"
-        echo -e "  ${GREEN}2${NC}. 查看可用内核列表"
-        echo -e "  ${GREEN}3${NC}. 安装新内核"
-        echo -e "  ${GREEN}4${NC}. 设置默认启动内核"
-        echo -e "  ${GREEN}5${NC}. 清理旧内核"
-        echo -e "  ${GREEN}6${NC}. 重启系统应用新内核"
-        echo -e "  ${GREEN}0${NC}. 返回主菜单"
-        echo -e "${CYAN}--------------------------------------------${NC}"
+        echo -e "\n"
+        show_menu_header "内核管理菜单"
+        create_aligned_menu \
+            "1" "显示当前内核信息" \
+            "2" "查看可用内核列表" \
+            "3" "安装新内核" \
+            "4" "设置默认启动内核" \
+            "5" "清理旧内核" \
+            "6" "重启系统应用新内核"
+        echo -e "${UI_DIVIDER}"
+        show_menu_option "0" "返回主菜单"
+        show_menu_footer
         
-        read -p "请选择操作 [0-6]: " choice
+        choice=$(get_menu_choice "请选择操作 [0-6]: " "0 1 2 3 4 5 6" "0")
         
         case $choice in
             1)
@@ -462,7 +575,7 @@ kernel_management_menu() {
         esac
         
         echo
-        read -p "按回车键继续..."
+        pause_function
     done
 }
 
@@ -764,13 +877,63 @@ update_system() {
     log_success "系统更新完成！您的 PVE 现在是最新版本"
 }
 
-# 暂停函数
-pause() {
-    read -n 1 -p "按任意键继续... " input
+# 标准化暂停函数
+pause_function() {
+    echo -ne "${CYAN}按任意键继续...${NC} "
+    read -n 1 -s input
     if [[ -n ${input} ]]; then
         echo -e "\b
 "
     fi
+}
+
+# Enhanced input validation function
+validate_input() {
+    local input="$1"
+    local valid_options="$2"
+    local default_value="${3:-}"
+    
+    if [[ -z "$input" && -n "$default_value" ]]; then
+        echo "$default_value"
+        return 0
+    fi
+    
+    if [[ -n "$valid_options" ]]; then
+        local option
+        for option in $valid_options; do
+            if [[ "$input" == "$option" ]]; then
+                echo "$input"
+                return 0
+            fi
+        done
+        # If we reached here, input was not in valid options
+        echo ""
+        return 1
+    else
+        # If no valid options provided, return input as is
+        echo "$input"
+        return 0
+    fi
+}
+
+# Enhanced menu input function with validation
+get_menu_choice() {
+    local prompt="$1"
+    local valid_options="$2"
+    local default_value="${3:-}"
+    
+    while true; do
+        read -p "$prompt" choice
+        validated_choice=$(validate_input "$choice" "$valid_options" "$default_value")
+        
+        if [[ -n "$validated_choice" ]]; then
+            echo "$validated_choice"
+            return 0
+        else
+            log_error "无效选择，请重新输入！"
+            echo -ne "${YELLOW}有效选项: $valid_options${NC}\n"
+        fi
+    done
 }
 
 #--------------开启硬件直通----------------
@@ -780,7 +943,7 @@ enable_pass() {
     log_step "开启硬件直通..."
     if [ `dmesg | grep -e DMAR -e IOMMU|wc -l` = 0 ];then
         log_error "您的硬件不支持直通！不如检查一下主板的BIOS设置？"
-        pause
+        pause_function
         return
     fi
     if [ `cat /proc/cpuinfo|grep Intel|wc -l` = 0 ];then
@@ -826,7 +989,7 @@ disable_pass() {
     if [ `dmesg | grep -e DMAR -e IOMMU|wc -l` = 0 ];then
         log_error "您的硬件不支持直通！"
         log_tips "不如检查一下主板的BIOS设置？"
-        pause
+        pause_function
         return
     fi
     if [ `cat /proc/cpuinfo|grep Intel|wc -l` = 0 ];then
@@ -857,33 +1020,30 @@ hw_passth() {
     while :; do
         clear
         show_banner
-        cat<<-EOF
-${YELLOW}              配置硬件直通${NC}
-┌──────────────────────────────────────────┐
-    1. 开启硬件直通
-    2. 关闭硬件直通
-├──────────────────────────────────────────┤
-    0. 返回
-└──────────────────────────────────────────┘
-EOF
-        echo -ne " 请选择: [ ]\b\b"
-        read -t 60 hwmenuid
+        show_menu_header "配置硬件直通"
+        create_aligned_menu \
+            "1" "开启硬件直通" \
+            "2" "关闭硬件直通" \
+            "0" "返回"
+        show_menu_footer
+        read -p "请选择: [ ]" -n 1 hwmenuid
+        echo  # New line after input
         hwmenuid=${hwmenuid:-0}
         case "${hwmenuid}" in
             1)
                 enable_pass
-                pause
+                pause_function
                 ;;
             2)
                 disable_pass
-                pause
+                pause_function
                 ;;
             0)
                 break
                 ;;
             *)
                 log_error "无效选项!"
-                pause
+                pause_function
                 ;;
         esac
     done
@@ -897,30 +1057,24 @@ cpupower() {
     while :; do
         clear
         show_banner
-        cat <<-EOF
---------------------------------------------
-             设置CPU电源模式
-┌──────────────────────────────────────────┐
-
-    1. 设置CPU模式 conservative  保守模式   [变身老年机]
-    2. 设置CPU模式 ondemand       按需模式  [默认]
-    3. 设置CPU模式 powersave      节能模式  [省电小能手]    
-    4. 设置CPU模式 performance   性能模式   [性能释放]
-    5. 设置CPU模式 schedutil      负载模式  [交给负载自动配置]
-
-    6. 恢复系统默认电源设置
-
-├──────────────────────────────────────────┤
-    0. 返回
-└──────────────────────────────────────────┘
-EOF
+        show_menu_header "设置CPU电源模式"
+        create_aligned_menu \
+            "1" "设置CPU模式 conservative  保守模式   [变身老年机]" \
+            "2" "设置CPU模式 ondemand       按需模式  [默认]" \
+            "3" "设置CPU模式 powersave      节能模式  [省电小能手]" \
+            "4" "设置CPU模式 performance   性能模式   [性能释放]" \
+            "5" "设置CPU模式 schedutil      负载模式  [交给负载自动配置]" \
+            "6" "恢复系统默认电源设置"
+        echo
+        show_menu_option "0" "返回"
+        show_menu_footer
         echo
         echo "部分CPU仅支持 performance 和 powersave 模式，只能选择这两项，其他模式无效不要选！"
         echo
         echo "你的CPU支持 ${governors} 模式"
         echo
-        echo -ne " 请选择: [ ]\b\b"
-        read -t 60 cpupowerid
+        read -p "请选择: [ ]" -n 1 cpupowerid
+        echo  # New line after input
         cpupowerid=${cpupowerid:-2}
         case "${cpupowerid}" in
             1)
@@ -940,15 +1094,15 @@ EOF
                 ;;
             6)
                 cpupower_del
-                pause
+                pause_function
                 break
                 ;;
             0)
                 break
                 ;;
             *)
-                log_error "你的输入无效 ,请重新输入 ! 你在干什么？"
-                pause
+                log_error "你的输入无效，请重新输入！"
+                pause_function
                 ;;
         esac
         if [[ ${GOVERNOR} != "" ]]; then
@@ -956,11 +1110,11 @@ EOF
                 echo "您选择的CPU模式：${GOVERNOR}"
                 echo
                 cpupower_add
-                pause
+                pause_function
             else
                 log_error "您的CPU不支持该模式！"
                 log_tips "现在暂时不会对你的系统造成影响，但是下次开机时，CPU模式会恢复为默认模式。"
-                pause
+                pause_function
             fi
         fi
     done
@@ -1016,7 +1170,7 @@ cpu_add() {
     echo pve版本$pvever
 
     # 判断是否已经执行过修改
-    [ ! -e $nodes.$pvever.bak ] || { log_warn "已经执行过修改，请勿重复执行"; pause; return;}
+    [ ! -e $nodes.$pvever.bak ] || { log_warn "已经执行过修改，请勿重复执行"; pause_function; return;}
 
     # 先刷新下源
     log_step "更新软件包列表..."
@@ -1058,7 +1212,7 @@ cpu_add() {
             log_tips "请检查你的硬件是否支持，或者尝试手动安装驱动。"
             log_tips "手动安装驱动方法：去制造商官网找驱动，然后手动安装。不会装驱动建议去问问AI"
             log_tips "猜你再找: https://claude.ai"
-            pause
+            pause_function
             return
         else
             for i in $drivers
@@ -1620,19 +1774,45 @@ EOF
     # sed -n '/pveversion/,+30p' $pvemanagerlib
     rm $tmpf
 
-    log_info "修改页面高度"
+    log_info "开始配置温度监控显示高度"
     disk_count=$(lsblk -d -o NAME | grep -cE 'sd[a-z]|nvme[0-9]')
-    # 高度变量，如果某些设备CPU核心过多，导致高度不够，修改65为合适的数字，如80、100等。
-    height_increase=$((disk_count * 65))
+    
+    # 提示用户配置高度相关信息
+    echo -e "${YELLOW}温度监控高度配置说明：${NC}"
+    echo -e "${CYAN}检测到系统中有 $disk_count 个磁盘设备${NC}"
+    echo -e "${GREEN}默认高度增量为每个磁盘69像素，如CPU核心过多导致高度不够可调整此值${NC}"
+    echo -e "${CYAN}当前设置：每个磁盘增加69像素高度${NC}"
+    echo
+    
+    # 用户可以选择自定义高度增量，或使用默认值
+    read -p "请输入每个磁盘的高度增量 (默认: 69, 直接回车使用默认值): " user_height_input
+    height_per_disk=${user_height_input:-69}
+    
+    # 验证输入是否为有效数字
+    if ! [[ "$height_per_disk" =~ ^[0-9]+$ ]]; then
+        log_warn "输入的高度增量无效，使用默认值69"
+        height_per_disk=69
+    fi
+    
+    height_increase=$((disk_count * height_per_disk))
 
     node_status_new_height=$((400 + height_increase))
-    sed -i -r '/widget\.pveNodeStatus/,+5{/height/{s#[0-9]+#'$node_status_new_height'#}}' $pvemanagerlib
+    sed -i -r '/widget\\.pveNodeStatus/,+5{/height/{s#[0-9]+#'$node_status_new_height'#}}' $pvemanagerlib
     cpu_status_new_height=$((300 + height_increase))
-    sed -i -r '/widget\.pveCpuStatus/,+5{/height/{s#[0-9]+#'$cpu_status_new_height'#}}' $pvemanagerlib
+    sed -i -r '/widget\\.pveCpuStatus/,+5{/height/{s#[0-9]+#'$cpu_status_new_height'#}}' $pvemanagerlib
 
-    log_info "修改后的高度值："
+    log_info "配置后的高度值："
     sed -n -e '/widget\.pveNodeStatus/,+5{/height/{p}}' \
            -e '/widget\.pveCpuStatus/,+5{/height/{p}}' $pvemanagerlib
+    # 添加滚动功能 - 为各种温度监控组件添加垂直滚动
+    sed -i '/widget\.pveNodeStatus/,+10{s/height:[[:space:]]*[0-9]{1,}[[:space:]]*;/height: '$node_status_new_height'px; overflow-y: auto; padding-right: 8px;/}' $pvemanagerlib
+    sed -i '/widget\.pveCpuStatus/,+10{s/height:[[:space:]]*[0-9]{1,}[[:space:]]*;/height: '$cpu_status_new_height'px; overflow-y: auto; padding-right: 8px;/}' $pvemanagerlib
+    
+    log_info "高度配置完成："
+    echo -e "${GREEN}节点状态组件高度: ${node_status_new_height}px${NC}"
+    echo -e "${GREEN}CPU状态组件高度: ${cpu_status_new_height}px${NC}"
+    echo -e "${YELLOW}每个磁盘增加高度: ${height_per_disk}px${NC}"
+    echo -e "${CYAN}磁盘数量: ${disk_count}${NC}"
 
     # 调整显示布局
     ln=$(expr $(sed -n -e '/widget.pveDcGuests/=' $pvemanagerlib) + 10)
@@ -1688,7 +1868,7 @@ pve9_ceph() {
     esac
     if [ ! $sver ];then
         log_error "版本不支持！"
-        pause
+        pause_function
         return
     fi
 
@@ -1725,7 +1905,7 @@ pve8_ceph() {
     esac
     if [ ! $sver ];then
         log_error "版本不支持！"
-        pause
+        pause_function
         return
     fi
 
@@ -2005,8 +2185,9 @@ EOF
 show_system_info() {
     log_step "为您展示系统运行状况"
     echo
-    echo -e "${CYAN}系统信息概览${NC}"
-    echo -e "${BLUE}----------------------------------------${NC}"
+    echo -e "${UI_BORDER}"
+    echo -e "${CYAN}│${NC} ${YELLOW}系统信息概览${NC} ${CYAN}                                  │${NC}"
+    echo -e "${UI_DIVIDER}"
     echo -e "PVE 版本: ${GREEN}$(pveversion | head -n1)${NC}"
     echo -e "内核版本: ${GREEN}$(uname -r)${NC}"
     echo -e "CPU 信息: ${GREEN}$(lscpu | grep 'Model name' | sed 's/Model name:[ \t]*//')${NC}"
@@ -2021,38 +2202,38 @@ show_system_info() {
     echo -e "网络接口:"
     ip -br addr show | awk '{print "  "$1" "$3}'
     echo -e "当前时间: ${GREEN}$(date)${NC}"
-    echo -e "${BLUE}----------------------------------------${NC}"
+    echo -e "${UI_FOOTER}"
 }
 
 # 主菜单
 show_menu() {
-    echo -e "${MAGENTA}请选择您需要的功能：${NC}"
-    echo
-    echo -e "${YELLOW}1.${NC} 更换软件源 ${GREEN}(强烈推荐，让下载飞起来)${NC}"
-    echo -e "${YELLOW}2.${NC} 删除订阅弹窗 ${GREEN}(告别烦人提醒)${NC} | ${RED}（谨慎操作）并且只能在SSH环境下使用否则会被截断${NC}"
-    echo -e "${YELLOW}3.${NC} 合并 local 与 local-lvm ${CYAN}(小硬盘救星)${NC}"
-    echo -e "${YELLOW}4.${NC} 删除 Swap 分区 ${CYAN}(释放更多空间)${NC}"
-    echo -e "${YELLOW}5.${NC} 更新系统 ${GREEN}(保持最新状态)${NC}"
-    echo -e "${YELLOW}6.${NC} 显示系统信息 ${BLUE}(查看运行状况)${NC}"
-    echo -e ""
-    echo -e "${YELLOW}7.${NC} 一键配置 ${MAGENTA}(换源+删弹窗+更新，懒人必选，推荐在SSH下使用)${NC}"
-    echo -e ""
-    echo -e "${YELLOW}8.${NC} 硬件直通配置 ${BLUE}(PCI设备直通设置)${NC}"
-    echo -e "${YELLOW}9.${NC} CPU电源模式 ${BLUE}(调整CPU性能模式)${NC}"
-    echo -e "${YELLOW}10.${NC} 温度监控设置 ${BLUE}(CPU/硬盘温度显示)${NC}"
-    echo -e "${YELLOW}11.${NC} 温度监控移除 ${BLUE}(移除温度监控功能)${NC}"
-    echo -e "${YELLOW}12.${NC} 添加ceph-squid源 ${BLUE}(PVE8/9专用)${NC}"
-    echo -e "${YELLOW}13.${NC} 添加ceph-quincy源 ${BLUE}(PVE7/8专用)${NC}"
-    echo -e "${YELLOW}14.${NC} 卸载Ceph ${BLUE}(完全移除Ceph)${NC}"
-    echo -e "${YELLOW}15.${NC} 内核管理 ${MAGENTA}(内核切换/更新/清理)${NC}"
-    echo -e ""
-    echo -e "${YELLOW}16.${NC} PVE8 升级到 PVE9 ${RED}(PVE8专用)${NC}"
-    echo -e ""
-    echo -e "${YELLOW}0.${NC} 退出脚本"
-    echo -e "${MAGENTA}520.${NC} 给作者点个Star吧，谢谢喵~ ${NC}"
+    show_menu_header "请选择您需要的功能："
+    
+    # Using the enhanced aligned menu function for better visual consistency
+    create_aligned_menu \
+        "1"  "更换软件源 ${GREEN}(强烈推荐，让下载飞起来)${NC}" \
+        "2"  "删除订阅弹窗 ${GREEN}(告别烦人提醒)${NC} | ${RED}（谨慎操作）并且只能在SSH环境下使用否则会被截断${NC}" \
+        "3"  "合并 local 与 local-lvm ${CYAN}(小硬盘救星)${NC}" \
+        "4"  "删除 Swap 分区 ${CYAN}(释放更多空间)${NC}" \
+        "5"  "更新系统 ${GREEN}(保持最新状态)${NC}" \
+        "6"  "显示系统信息 ${BLUE}(查看运行状况)${NC}" \
+        "7"  "一键配置 ${MAGENTA}(换源+删弹窗+更新，懒人必选，推荐在SSH下使用)${NC}" \
+        "8"  "硬件直通配置 ${BLUE}(PCI设备直通设置)${NC}" \
+        "9"  "CPU电源模式 ${BLUE}(调整CPU性能模式)${NC}" \
+        "10" "温度监控设置 ${BLUE}(CPU/硬盘温度显示)${NC}" \
+        "11" "温度监控移除 ${BLUE}(移除温度监控功能)${NC}" \
+        "12" "添加ceph-squid源 ${BLUE}(PVE8/9专用)${NC}" \
+        "13" "添加ceph-quincy源 ${BLUE}(PVE7/8专用)${NC}" \
+        "14" "卸载Ceph ${BLUE}(完全移除Ceph)${NC}" \
+        "15" "内核管理 ${MAGENTA}(内核切换/更新/清理)${NC}" \
+        "16" "PVE8 升级到 PVE9 ${RED}(PVE8专用)${NC}" \
+        "0"  "退出脚本" \
+        "520" "给作者点个Star吧，谢谢喵~ ${NC}"
+    
+    show_menu_footer
     echo
     echo -e "${CYAN}小贴士：新装系统推荐选择 7 进行一键配置${NC}"
-    echo -n -e "${GREEN}请输入您的选择 [0-16]: ${NC}"
+    echo -n -e "${GREEN}请输入您的选择 [0-16, 520]: ${NC}"
 }
 
 # 一键配置
@@ -2070,19 +2251,74 @@ quick_setup() {
     echo -e "${CYAN}现在您可以愉快地使用 PVE 了！${NC}"
 }
 
+# 通用UI函数
+show_menu_header() {
+    local title="$1"
+    echo -e "${UI_BORDER}"
+    local border_length=50  # Fixed length of the border
+    local content_length=$(echo -n "$title" | wc -c)
+    local padding_length=$((border_length - 4 - content_length))  # 4 accounts for │ and NC tags
+    printf "${CYAN}│${NC} %s%*s ${CYAN}│${NC}\n" "$title" $padding_length ""
+    echo -e "${UI_DIVIDER}"
+}
+
+show_menu_footer() {
+    echo -e "${UI_FOOTER}"
+}
+
+show_menu_option() {
+    local num="$1"
+    local desc="$2"
+    local color="${3:-$GREEN}" # Default to green if no color specified
+    printf "  ${color}%-3s${NC}. %s\n" "$num" "$desc"
+}
+
+# Enhanced function to create aligned menu options
+create_aligned_menu() {
+    local max_num_length=0
+    local max_desc_length=0
+    local temp_nums=()
+    local temp_descs=()
+    local temp_colors=()
+    
+    # Read all parameters into arrays
+    local i=0
+    while [[ $# -gt 0 ]]; do
+        temp_nums[i]="$1"
+        shift
+        temp_descs[i]="$1"
+        shift
+        temp_colors[i]="${1:-$GREEN}"
+        shift
+        ((i++))
+    done
+    
+    # Find max lengths for alignment
+    for num in "${temp_nums[@]}"; do
+        if [[ ${#num} -gt $max_num_length ]]; then
+            max_num_length=${#num}
+        fi
+    done
+    
+    # Create aligned menu
+    for ((j=0; j<${#temp_nums[@]}; j++)); do
+        printf "  ${temp_colors[j]}%-${max_num_length}s${NC}. %s\n" "${temp_nums[j]}" "${temp_descs[j]}"
+    done
+}
+
 # 镜像源选择函数
 select_mirror() {
     while true; do
         clear
         show_banner
-        echo -e "先选择一下镜像源吧！"
-        echo -e "${CYAN}----------------- 镜像源选择 ------------------${NC}"
-        echo -e "请选择默认镜像源："
-        echo -e "  ${GREEN}1${NC}. 中科大镜像源"
-        echo -e "  ${GREEN}2${NC}. 清华Tuna镜像源"
-        echo -e "  ${GREEN}3${NC}. Debian默认源 ${YELLOW}非必要请勿使用本源${NC}"
-        echo -e "${CYAN}----------------------------------------------${NC}"
+        show_menu_header "请选择镜像源"
+        create_aligned_menu \
+            "1" "中科大镜像源" \
+            "2" "清华Tuna镜像源" \
+            "3" "Debian默认源 ${YELLOW}非必要请勿使用本源${NC}"
+        echo -e "${UI_DIVIDER}"
         echo -e "${YELLOW}注意：选择后将作为后续所有软件源操作的基础${NC}"
+        show_menu_footer
         echo
         
         read -p "请选择 [1-3]: " mirror_choice
@@ -2105,8 +2341,7 @@ select_mirror() {
                 ;;
             *)
                 log_error "无效选择，请重新输入"
-                echo -e "${YELLOW}按回车键继续...${NC}"
-                read -r
+                pause_function
                 ;;
         esac
     done
@@ -2198,7 +2433,7 @@ main() {
     while true; do
         show_banner
         show_menu
-        read -n 2 choice
+        choice=$(get_menu_choice "${GREEN}请输入您的选择 [0-16, 520]: ${NC}" "0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 520" "0")
         echo
         echo
         
@@ -2267,8 +2502,7 @@ main() {
         esac
         
         echo
-        echo -e "${YELLOW}按回车键返回主菜单...${NC}"
-        read -r
+        pause_function
     done
 }
 
